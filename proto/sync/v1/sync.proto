@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package compressor.sync.v1;
+
+// Null type
+message Null {}
+
+// Identifier of a specific block
+message BlockRef {
+    uint64 slot = 1; // Block absolute slot
+    bytes hash = 2; // Block hash
+}
+
+// Identifier of a specific transaction output
+message TxoRef {
+    bytes tx_hash = 1; // Transaction hash of transaction which produced the output
+    uint32 txo_index = 2; // Output index in producing transaction
+}
+
+message ResolvedTxo {
+    TxoRef ref = 1; // txo reference
+    uint64 slot = 2; // slot of block which produced txo
+    uint32 era = 3; // era for decoding transaction output bytes
+    bytes raw = 4; // raw cbor bytes of transaction output
+}
+
+// Block bytes with map of resolved transaction inputs
+message BlockWithContext {
+    BlockRef ref = 1; // Block reference (point)
+    bytes raw = 2; // Raw bytes of block
+    repeated ResolvedTxo txo_resolver = 3; // Map of transaction output references to raw bytes
+}
+
+// Request to receive blocks, with input context, in chain order
+message PageBlocksWithCtxRequest {
+    BlockRef cursor = 1; // Pagination cursor
+    uint32 max_items = 2; // Max items per page
+}
+
+// Response with page of blocks with contexts
+message PageBlocksWithCtxResponse {
+    repeated BlockWithContext blocks = 1; // List of requested blocks with contexts
+    BlockRef next_cursor = 2; // Pagination cursor (first block of next page)
+    BlockRef chain_tip = 3; // Chain tip at time of response
+}
+
+// Request to receive stream of chain events (new block or rollback)
+message StreamUpdatesWithCtxRequest {
+  repeated BlockRef intersects = 1; // List of candidate intersect points, highest priority first
+}
+
+// Response containing the chain update
+message StreamUpdatesWithCtxResponse {
+  oneof action {
+    BlockWithContext apply = 1; // Apply this block
+    BlockRef undo = 2; // Undo this block
+    BlockRef reset = 3; // Rollback point
+    Null origin = 4; // Origin
+  }
+}
+
+// Service
+service SyncService {
+  rpc PageBlocksWithContext(PageBlocksWithCtxRequest) returns (PageBlocksWithCtxResponse); // Fetch a number of blocks starting from a point in the chain, with transaction input context
+  rpc StreamUpdatesWithContext(StreamUpdatesWithCtxRequest) returns (stream StreamUpdatesWithCtxResponse); // Stream chain updates (new blocks, rollbacks) from a point in the chain, with transaction input context
+}

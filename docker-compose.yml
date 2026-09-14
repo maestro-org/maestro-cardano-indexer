@@ -1,0 +1,333 @@
+# Full Cardano indexing stack on the preprod network.
+#
+#   docker compose up -d --build
+#
+# Services come up in dependency order; cardano-node then compressor begin
+# syncing preprod immediately (first run takes a few hours). Progress:
+#
+#   curl -s localhost:50052/health | jq          # compressor sync progress
+#   docker compose logs -f polyphony-a           # reducer commits
+#   curl -s localhost:4000/healthcheck           # API up
+#
+# The endpoints backed by cardano-db-sync and Ogmios (accounts, pools, epochs,
+# protocol parameters, transaction evaluation) need the `full` profile:
+#
+#   docker compose --profile full up -d
+#
+# The second indexer instance (demonstrating parallel backfill + swap-over) is
+# behind a profile — start it once polyphony-a is ahead:
+#
+#   docker compose --profile multi up -d polyphony-b
+#
+# MVCC garbage collection (tikv-gc) runs automatically every 10 minutes;
+# `make gc` triggers a manual one-shot run.
+
+name: cardano-stack
+
+services:
+  cardano-node:
+    image: ghcr.io/intersectmbo/cardano-node:11.1.0
+    environment:
+      NETWORK: preprod
+    volumes:
+      - node-data:/data
+      - node-ipc:/ipc
+      # Exposes the image's baked network configs and genesis files (populated
+      # into this volume on first start) so db-sync and Ogmios can read them.
+      - node-config:/opt/cardano/config
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /ipc/node.socket"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+    restart: unless-stopped
+
+  compressor:
+    build:
+      context: .
+      dockerfile: services/compressor/Dockerfile
+    # cardano-node creates its IPC socket root-owned inside the shared volume,
+    # so the socket consumer must run as root here.
+    user: "0"
+    command: ["/etc/compressor/config.toml", "daemon"]
+    volumes:
+      - ./configs/compressor/preprod.toml:/etc/compressor/config.toml:ro
+      - ./services/compressor/genesis/preprod-byron.json:/etc/compressor/preprod-byron.json:ro
+      - node-ipc:/ipc
+      - compressor-rolldb:/data
+    ports:
+      - "50051:50051" # gRPC sync service
+      - "50052:50052" # health
+    depends_on:
+      cardano-node:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:50052/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    restart: unless-stopped
+
+  pd:
+    image: pingcap/pd:v8.5.1
+    command:
+      - --name=pd
+      - --client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://pd:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --advertise-peer-urls=http://pd:2380
+      - --data-dir=/data/pd
+    volumes:
+      - pd-data:/data
+    ports:
+      - "2379:2379"
+    restart: unless-stopped
+
+  tikv:
+    image: pingcap/tikv:v8.5.1
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv:20160
+      - --status-addr=0.0.0.0:20180
+      - --pd-endpoints=http://pd:2379
+      - --data-dir=/data/tikv
+      - --config=/etc/tikv/tikv.toml
+    volumes:
+      - tikv-data:/data
+      - ./configs/tikv/tikv.toml:/etc/tikv/tikv.toml:ro
+    depends_on:
+      - pd
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.2
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  polyphony-a:
+    build:
+      context: .
+      dockerfile: services/polyphony/Dockerfile
+    command: ["daemon", "--console", "plain", "--config", "/etc/polyphony/config.toml"]
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/polyphony/preprod-a.toml:/etc/polyphony/config.toml:ro
+    depends_on:
+      compressor:
+        condition: service_started
+      tikv:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Second indexer instance (different instance_id, same reducers): start it later
+  # to watch it backfill in parallel and take over instance selection in mapi once
+  # it catches up.
+  polyphony-b:
+    profiles: ["multi"]
+    build:
+      context: .
+      dockerfile: services/polyphony/Dockerfile
+    command: ["daemon", "--console", "plain", "--config", "/etc/polyphony/config.toml"]
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/polyphony/preprod-b.toml:/etc/polyphony/config.toml:ro
+    depends_on:
+      compressor:
+        condition: service_started
+      tikv:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mapi:
+    build:
+      context: .
+      dockerfile: services/mapi/Dockerfile
+    command: ["server"]
+    environment:
+      NETWORK: preprod
+      TIKV_PD_CLIENT: pd:2379
+      REDIS: redis://redis:6379
+      MAPI_PORT: "4000"
+      # db-sync-backed and Ogmios-backed endpoints need the `full` profile;
+      # without it those endpoints return errors and the rest of the API works.
+      DBSYNC_DB_URL: postgres://postgres:cexplorer@postgres/cexplorer
+      OGMIOS_V6_URL: ws://ogmios:1337
+    ports:
+      - "4000:4000"
+    depends_on:
+      tikv:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4000/healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # MVCC GC safepoint manager: computes the newest safely-collectable timestamp
+  # from the indexer cursors in Redis and submits it to PD, every 10 minutes.
+  # Without it TiKV never garbage-collects old MVCC versions.
+  tikv-gc:
+    build:
+      context: .
+      dockerfile: services/tikv-gc/Dockerfile
+    command: ["sh", "-c", "while true; do tikv-gc; sleep 600; done"]
+    environment:
+      TIKV_ADDRESS: pd:2379
+      REDIS_ADDRESS: redis://redis:6379
+    depends_on:
+      tikv:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # On-demand admin CLI (never auto-starts). Inspect or delete indexer key ranges:
+  #   docker compose run --rm daw pd:2379 redis://redis:6379 delete instance 0 1
+  # Dry-run by default; append --force to actually delete.
+  daw:
+    profiles: ["admin"]
+    build:
+      context: .
+      dockerfile: services/daw/Dockerfile
+    entrypoint: ["daw"]
+    environment:
+      RUST_LOG: info
+    restart: "no"
+
+  # --- `full` profile: backends for the db-sync/Ogmios endpoint groups ---
+
+  postgres:
+    profiles: ["full"]
+    build:
+      context: ./configs/postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: cexplorer
+      POSTGRES_DB: cexplorer
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  cardano-db-sync:
+    profiles: ["full"]
+    image: ghcr.io/intersectmbo/cardano-db-sync:13.7.0.2
+    # Runs with a custom configuration (rather than the image's NETWORK
+    # presets) so the deduplicated `address` table is populated — the Koios
+    # SQL layer's pool/account functions depend on it.
+    command:
+      [
+        "--config",
+        "/etc/db-sync/config.json",
+        "--socket-path",
+        "/node-ipc/node.socket",
+      ]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: cexplorer
+      POSTGRES_DB: cexplorer
+    volumes:
+      - db-sync-data:/var/lib/cexplorer
+      - node-ipc:/node-ipc
+      - node-config:/config:ro
+      - ./configs/db-sync/preprod.json:/etc/db-sync/config.json:ro
+    depends_on:
+      cardano-node:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One-shot: installs the Koios SQL layer (grest schema) plus mapi's local
+  # overrides into the db-sync database. The pool/account/epoch endpoint
+  # groups depend on these. Runs once when the `full` profile starts; safe to
+  # re-run. Needs network access to fetch the pinned koios-artifacts release.
+  dbsync-migrations:
+    profiles: ["full"]
+    image: postgres:15
+    entrypoint: ["/bin/sh", "/migrations/run-dataplane-migrations.sh"]
+    environment:
+      NETWORK: preprod
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: cexplorer
+      PGDATABASE: cexplorer
+    volumes:
+      - ./services/mapi/migrations:/migrations:ro
+      - node-config:/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cardano-node:
+        condition: service_healthy
+    restart: "no"
+
+  # Refreshes the grest cached tables (active stake, epoch info, pool
+  # history, stake distribution) every 10 minutes — the same jobs Koios runs
+  # via cron. Updates are skipped until db-sync reaches the chain tip.
+  dbsync-caches:
+    profiles: ["full"]
+    image: postgres:15
+    entrypoint: ["/bin/sh", "/migrations/run-cache-updates.sh"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: cexplorer
+      PGDATABASE: cexplorer
+    volumes:
+      - ./services/mapi/migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ogmios:
+    profiles: ["full"]
+    image: cardanosolutions/ogmios:v6.11.0
+    command:
+      - --host=0.0.0.0
+      - --port=1337
+      - --node-socket=/ipc/node.socket
+      - --node-config=/config/preprod/config.json
+    volumes:
+      - node-ipc:/ipc
+      - node-config:/config
+    depends_on:
+      cardano-node:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  node-data:
+  node-ipc:
+  node-config:
+  compressor-rolldb:
+  pd-data:
+  tikv-data:
+  postgres-data:
+  db-sync-data:

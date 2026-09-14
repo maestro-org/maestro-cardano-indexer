@@ -1,0 +1,68 @@
+# Polyphony indexer configuration — preview network, instance 1.
+
+[source]
+type = "Compressor"
+url = "http://compressor:50051"
+max_items_per_page = 20
+
+[intersect]
+type = "Origin"
+
+[storage]
+type = "TiKV"
+connection_params = "pd:2379"
+redis_address = "redis://redis:6379"
+network = "preview"
+dataplane_id = 0
+instance_id = 1
+
+[[reducers]]
+type = "BalanceByAddress"
+
+[[reducers]]
+type = "BlockByHeight"
+
+[[reducers]]
+type = "BlockByTx"
+
+[[reducers]]
+type = "Cip25MetadataByAsset"
+
+[[reducers]]
+type = "DatumByHash"
+
+[[reducers]]
+type = "MintMetadataByAsset"
+
+[[reducers]]
+type = "ScriptByHash"
+
+[[reducers]]
+type = "SupplyByAsset"
+
+[[reducers]]
+type = "TxByHash"
+
+[[reducers]]
+type = "TxCountByAddress"
+
+[[reducers]]
+type = "TxsByAddress"
+
+[[reducers]]
+type = "TxsByPayCred"
+
+[[reducers]]
+type = "TxsByPolicy"
+
+[[reducers]]
+type = "UpdatesByPolicy"
+
+[[reducers]]
+type = "UtxoCborByAddress"
+
+[[reducers]]
+type = "UtxosByAsset"
+
+[[reducers]]
+type = "UtxosByPolicy"

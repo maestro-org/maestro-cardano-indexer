@@ -1,0 +1,54 @@
+[package]
+name = "polyphony"
+version = "0.1.0"
+edition = "2021"
+description = "Cardano indexer: reducer pipeline consuming enriched blocks and writing to TiKV"
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+
+[dependencies]
+pallas = "1.0.0"
+hex = "0.4.3"
+redis = "0.27.2"
+clap = { version = "3.2.6", features = ["derive"] }
+chrono = "0.4.38"
+log = "0.4.14"
+merge = "0.1.0"
+config = { version = "0.13.3", default-features = false, features = [
+    "toml",
+    "json",
+] }
+serde = { version = "1.0.136", features = ["derive"] }
+minicbor = { version = "0.19.1", features = ["std"] }
+gasket = { git = "https://github.com/construkts/gasket-rs.git", rev = "8b90825f63eb975d323ed3133d72db95e600b927" }
+thiserror = "^1.0.30"
+tikv-client = { git = "https://github.com/maestro-org/client-rust.git", rev = "0ea0f5620ea5f64c202260b5359facc6c8993eab" }
+timbre = { path = "../../crates/timbre" }
+lazy_static = "1.4.0"
+async-trait = "0.1.68"
+itertools = "0.10.5"
+tracing = "0.1.36"
+tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
+
+# async feature
+futures = { version = "0.3.24" }
+tokio = { version = "1.21.1", features = ["rt-multi-thread"] }
+
+# tui feature
+indicatif = { version = "0.17.0-rc.11", optional = true }
+
+tonic = { version = "0.11.0", features = ["tls", "gzip"] }
+prost = "0.12"
+futures-util = "0.3.30"
+
+[features]
+tui = ["indicatif"]
+default = ["tui"]
+
+[build-dependencies]
+tonic-build = "0.11.0"
+
+[lints]
+workspace = true

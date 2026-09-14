@@ -1,0 +1,65 @@
+[package]
+name = "mapi"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP API serving indexed Cardano data from TiKV and cardano-db-sync"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1.0.62"
+axum = { version = "0.6.18", features = ["headers"] }
+clap = { version = "4.2.4", features = ["derive"] }
+futures-util = "0.3.24"
+hex = "0.4.3"
+pallas = "1.0.0"
+redis = { version = "0.27.2", features = ["tokio-comp", "connection-manager"] }
+r2d2 = "0.8.10"
+r2d2_redis2 = "0.23.3"
+serde = { version = "1.0.143", features = ["derive"] }
+serde_json = { version = "1.0.83", features = ["preserve_order"] }
+sqlx = { version = "0.6.1", features = [
+    "runtime-tokio-rustls",
+    "any",
+    "postgres",
+    "chrono",
+    "bigdecimal",
+    "json",
+] }
+tokio = { version = "1.20.3", features = ["full"] }
+tokio-tungstenite = "0.17.2"
+tracing = "0.1.36"
+tracing-subscriber = { version = "0.3.15", features = ["env-filter"] }
+url = "2.3.1"
+utoipa = { version = "3.3.0", features = ["axum_extras"] }
+itertools = "0.10.5"
+tower-http = { version = "0.3.0", features = ["cors"] }
+config = "0.13.3"
+bech32 = "0.9.1"
+lazy_static = "1.4.0"
+
+tikv-client = { git = "https://github.com/maestro-org/client-rust.git", rev = "0ea0f5620ea5f64c202260b5359facc6c8993eab" }
+bb8 = "0.8.1"
+bb8-tikv = { git = "https://github.com/maestro-org/bb8-tikv.git", rev = "b815ea57b9eb49fe9e4ebd05796f5faaadff7490" }
+
+timbre = { path = "../../crates/timbre" }
+base64 = "0.21.2"
+chrono = "0.4.26"
+uplc = { git = "https://github.com/maestro-org/aiken", rev = "887011322d19354e62e5e6c00cc2eb452aaff046" }
+
+cryptoxide = "0.4.4"
+reqwest = { version = "0.11.14", features = ["json"] }
+strum = "0.24.1"
+strum_macros = "0.24.1"
+
+[dev-dependencies]
+serial_test = "0.5"
+ctor = "0.1"
+tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
+
+[lints]
+workspace = true
+
+[features]
+# Compiles the integration tests that need a running local stack
+stack-tests = []

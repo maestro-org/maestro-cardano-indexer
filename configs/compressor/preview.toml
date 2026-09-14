@@ -1,0 +1,21 @@
+[logging]
+max_level = "info"
+
+[chain_db]
+path = "/data/rolldb"
+# Depth of the mutable window in slots (~1.5 days). This also caps how far
+# behind the tip an indexer can intersect the mutable stream, so it bounds the
+# indexer's effective rollback runway.
+immutable_after_slots = 129600
+
+[sync]
+node_socket = "/ipc/node.socket"
+# preview = 2, preprod = 1, mainnet = 764824073
+network_magic = 2
+health_endpoint = "0.0.0.0:50052"
+
+[serve]
+listen_address = "[::]:50051"
+
+[byron]
+path = "/etc/compressor/preview-byron.json"

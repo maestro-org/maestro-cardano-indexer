@@ -1,0 +1,32 @@
+# Mainnet overlay: docker compose -f docker-compose.yml -f docker-compose.mainnet.yml up -d
+services:
+  cardano-node:
+    environment:
+      NETWORK: mainnet
+  compressor:
+    volumes:
+      - ./configs/compressor/mainnet.toml:/etc/compressor/config.toml:ro
+      - ./services/compressor/genesis/mainnet-byron.json:/etc/compressor/mainnet-byron.json:ro
+      - node-ipc:/ipc
+      - compressor-rolldb:/data
+  polyphony-a:
+    volumes:
+      - ./configs/polyphony/mainnet.toml:/etc/polyphony/config.toml:ro
+  mapi:
+    environment:
+      NETWORK: mainnet
+  cardano-db-sync:
+    volumes:
+      - db-sync-data:/var/lib/cexplorer
+      - node-ipc:/node-ipc
+      - node-config:/config:ro
+      - ./configs/db-sync/mainnet.json:/etc/db-sync/config.json:ro
+  dbsync-migrations:
+    environment:
+      NETWORK: mainnet
+  ogmios:
+    command:
+      - --host=0.0.0.0
+      - --port=1337
+      - --node-socket=/ipc/node.socket
+      - --node-config=/config/mainnet/config.json

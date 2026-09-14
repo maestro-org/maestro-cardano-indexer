@@ -1,0 +1,7 @@
+# Compose data
+.compose/
+
+tmp/
+
+# Added by cargo
+target/

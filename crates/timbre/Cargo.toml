@@ -1,0 +1,17 @@
+[package]
+name = "timbre"
+version = "0.1.0"
+edition = "2021"
+description = "TiKV key/value encoding schema shared by the Cardano indexer and API"
+license.workspace = true
+repository.workspace = true
+
+
+[dependencies]
+pallas = "1.0.0"
+cryptoxide = "0.4.4"
+hex = "0.4.3"
+base64 = "0.21.0"
+
+[lints]
+workspace = true

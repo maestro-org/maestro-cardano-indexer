@@ -1,0 +1,29 @@
+Maestro Cardano Indexer
+Copyright 2026 Go Maestro Inc.
+
+This product includes software developed at Go Maestro Inc.
+(https://www.gomaestro.org/).
+
+---
+
+The indexer (polyphony) began as a fork of TxPipe's Scrolls
+(https://github.com/txpipe/scrolls, Apache-2.0) and has since been
+substantially rewritten; portions of the original remain. It is built on
+the gasket staged-pipeline framework (https://github.com/construkts/gasket-rs,
+Apache-2.0). Chain access is built on TxPipe's Pallas
+(https://github.com/txpipe/pallas, Apache-2.0). Plutus script evaluation
+uses uplc from the Aiken project (https://github.com/aiken-lang/aiken,
+Apache-2.0), via a maintained fork. The stack uses maintained forks of the
+TiKV Rust client and bb8-tikv, published under the maestro-org GitHub
+organisation.
+
+The optional `full` compose profile installs, at deploy time, the Koios SQL
+layer from the Cardano Community's koios-artifacts
+(https://github.com/cardano-community/koios-artifacts, CC-BY-4.0) and builds
+the pg_bech32 Postgres extension
+(https://github.com/cardano-community/pg_bech32, WTFPL), which links against
+libbech32 (https://github.com/whitslack/libbech32, WTFPL). These are fetched
+or built at deploy time and are not distributed as part of this repository,
+with one exception: services/mapi/migrations/dataplane contains two SQL
+functions adapted from koios-artifacts (CC-BY-4.0), modified as described in
+their file headers.
